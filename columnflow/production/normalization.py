@@ -348,7 +348,7 @@ def normalization_weights_setup(
                 raise e
             # for final weight, multiply by the luminosity, the cross section, the weight_in_dy_corrector
             # divide by the average weight in the current dataset to follow the strategy by the cclub people
-            process_weight_table[0, process_id] = (
+            process_weight_table[0, process_inst.id] = (
                 lumi * inclusive_xsec * weight_in_dy_corrector
                 / normalization_selection_stats_avg[self.dataset_inst.name]["sum_mc_weight"]
             )
