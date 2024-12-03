@@ -167,7 +167,8 @@ def get_br_from_inclusive_dataset(
     get_br_from_inclusive_dataset=get_br_from_inclusive_dataset,
     # only run on mc
     mc_only=True,
-    mode="cclub",
+    # mode="cclub",
+    mode="columnflow",
 )
 def normalization_weights(self: Producer, events: ak.Array, **kwargs) -> ak.Array:
     """
@@ -208,9 +209,7 @@ def normalization_weights(self: Producer, events: ak.Array, **kwargs) -> ak.Arra
     if self.allow_stitching and self.get_xsecs_from_inclusive_dataset and self.dataset_inst == self.inclusive_dataset:
         incl_norm_weight = events.mc_weight * self.inclusive_weight
         events = set_ak_column(events, self.weight_name_incl, incl_norm_weight, value_type=np.float32)
-    
-    from IPython import embed
-    embed(header="normalization_weights call_func complete")
+
     return events
 
 
@@ -287,8 +286,6 @@ def normalization_weights_setup(
     if len(normalization_selection_stats) > 1:
         from columnflow.tasks.selection import MergeSelectionStats
         merged_selection_stats = defaultdict(float)
-        from IPython import embed
-        embed(header="In normalization_weights.setup, about to merge selection stats")
         for stats in normalization_selection_stats.values():
             MergeSelectionStats.merge_counts(merged_selection_stats, stats)
     else:
@@ -321,7 +318,7 @@ def normalization_weights_setup(
 
     # create a event weight lookup table
     process_weight_table = sp.sparse.lil_matrix((1, max_id + 1), dtype=np.float32)
-    if self.mode == "cclub":
+    def stitching_weight_cclub():
         from columnflow.util import safe_div
         inclusive_proc = self.inclusive_dataset.processes.get_first()
         inclusive_xsec = inclusive_proc.get_xsec(self.config_inst.campaign.ecm).nominal
@@ -350,73 +347,63 @@ def normalization_weights_setup(
             # divide by the average weight in the current dataset to follow the strategy by the cclub people
             process_weight_table[0, process_inst.id] = (
                 lumi * inclusive_xsec * weight_in_dy_corrector
-                / normalization_selection_stats_avg[self.dataset_inst.name]["sum_mc_weight"]
+                # / normalization_selection_stats_avg[self.dataset_inst.name]["sum_mc_weight"]
             )
-    else:
-        if self.allow_stitching and self.get_xsecs_from_inclusive_dataset:
-        
-            inclusive_dataset = self.inclusive_dataset
-            logger.info(f"using inclusive dataset {inclusive_dataset.name} for cross section lookup")
 
-            # get the branching ratios from the inclusive sample
-            inclusive_proc = inclusive_dataset.processes.get_first()
-            if self.dataset_inst == inclusive_dataset and process_insts == {inclusive_proc}:
-                branching_ratios = {inclusive_proc.id: 1.0}
-            else:
-                branching_ratios = self.get_br_from_inclusive_dataset(
-                    inclusive_dataset=inclusive_dataset,
-                    stats=normalization_selection_stats,
-                )
-                if not branching_ratios:
-                    raise Exception(
-                        "no branching ratios could be computed based on the inclusive dataset "
-                        f"{inclusive_dataset}",
-                    )
-            inclusive_xsec = inclusive_proc.get_xsec(self.config_inst.campaign.ecm).nominal
-            inclusive_norm_dict = normalization_selection_stats_avg[inclusive_dataset.name]
-            # in order to account for possible differences in the distribution of the weights,
-            # we normalize the weights to the average weight in the dataset
-            # this needs to be divided by the sum of the weights weighted by their average, which
-            # mathematically is equivalent to multiplying with the number of events
-            self.inclusive_weight = (
-                lumi * inclusive_xsec * inclusive_norm_dict["num_events"] / inclusive_norm_dict["sum_mc_weight"]
-                if self.dataset_inst == inclusive_dataset
-                else 0
-            )
-            for process_id, br in branching_ratios.items():
-                # forumlar to reproduce cclub stitching weights (verified with process dy_m50toinf_1j_pt_200to400_amcatnlo)
-                # incl_sum_per_process = normalization_selection_stats[self.inclusive_dataset.name]["sum_mc_weight_per_process"]
-                # incl_sum = normalization_selection_stats[self.inclusive_dataset.name]["sum_mc_weight"]
-                # nominator = incl_sum_per_process[process_id]/incl_sum
-                # denominator = np.sum([
-                #   normalization_selection_stats[x]["sum_mc_weight_per_process"][process_id]/normalization_selection_stats[x]["sum_mc_weight"] * normalization_selection_stats[x]["num_events"] 
-                #   for x in normalization_selection_stats.keys() 
-                # ])
-                # weight_in_dy_corrector = nominator / denominator
+    def stitching_weight_columnflow():
+        inclusive_dataset = self.inclusive_dataset
+        logger.info(f"using inclusive dataset {inclusive_dataset.name} for cross section lookup")
 
-                # for final weight, multiply by the luminosity, the cross section, the weight_in_dy_corrector
-                # divide by the average weight in the current dataset to follow the strategy by the cclub people
-                # process_weight_table[0, process_id] = lumi * inclusive_xsec * weight_in_dy_corrector / normalization_selection_stats_avg[self.dataset_inst.name]["sum_mc_weight"]
-                try:
-                    sum_weights = merged_selection_stats["sum_mc_weight_per_process"][str(process_id)]
-                    process_weight_table[0, process_id] = lumi * inclusive_xsec * br * merged_selection_stats["num_events"] / sum_weights
-                except Exception as e:
-                    print(e)
-                    from IPython import embed
-                    embed(header="encountered error, start debug shell")
-                    raise e
+        # get the branching ratios from the inclusive sample
+        inclusive_proc = inclusive_dataset.processes.get_first()
+        if self.dataset_inst == inclusive_dataset and process_insts == {inclusive_proc}:
+            branching_ratios = {inclusive_proc.id: 1.0}
         else:
-            for process_inst in process_insts:
-                if self.config_inst.campaign.ecm not in process_inst.xsecs.keys():
-                    continue
-                sum_weights = merged_selection_stats["sum_mc_weight_per_process"][str(process_inst.id)]
-                xsec = process_inst.get_xsec(self.config_inst.campaign.ecm).nominal
-                process_weight_table[0, process_inst.id] = lumi * xsec * merged_selection_stats["num_events"] / sum_weights
+            branching_ratios = self.get_br_from_inclusive_dataset(
+                inclusive_dataset=inclusive_dataset,
+                stats=normalization_selection_stats,
+            )
+            if not branching_ratios:
+                raise Exception(
+                    "no branching ratios could be computed based on the inclusive dataset "
+                    f"{inclusive_dataset}",
+                )
+        inclusive_xsec = inclusive_proc.get_xsec(self.config_inst.campaign.ecm).nominal
+        inclusive_norm_dict = normalization_selection_stats_avg[inclusive_dataset.name]
+        # in order to account for possible differences in the distribution of the weights,
+        # we normalize the weights to the average weight in the dataset
+        # this needs to be divided by the sum of the weights weighted by their average, which
+        # mathematically is equivalent to multiplying with the number of events
+        self.inclusive_weight = (
+            lumi * inclusive_xsec * inclusive_norm_dict["num_events"] / inclusive_norm_dict["sum_mc_weight"]
+            if self.dataset_inst == inclusive_dataset
+            else 0
+        )
+        for process_id, br in branching_ratios.items():
+            try:
+                sum_weights = merged_selection_stats["sum_mc_weight_per_process"][str(process_id)]
+                process_weight_table[0, process_id] = lumi * inclusive_xsec * br * merged_selection_stats["num_events"] / sum_weights
+            except Exception as e:
+                print(e)
+                from IPython import embed
+                embed(header="encountered error, start debug shell")
+                raise e
+    
+    if self.allow_stitching and self.get_xsecs_from_inclusive_dataset:
+        if self.mode == "cclub":
+            stitching_weight_cclub()
+        else:
+            stitching_weight_columnflow()
+    else:
+        for process_inst in process_insts:
+            if self.config_inst.campaign.ecm not in process_inst.xsecs.keys():
+                continue
+            sum_weights = merged_selection_stats["sum_mc_weight_per_process"][str(process_inst.id)]
+            xsec = process_inst.get_xsec(self.config_inst.campaign.ecm).nominal
+            process_weight_table[0, process_inst.id] = lumi * xsec * merged_selection_stats["num_events"] / sum_weights
 
     self.process_weight_table = process_weight_table
     self.xs_process_ids = set(self.process_weight_table.rows[0])
-    from IPython import embed
-    embed(header="normalization_weights setup complete")
 
 
 @normalization_weights.init
