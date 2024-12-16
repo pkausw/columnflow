@@ -6,7 +6,6 @@ Lightweight mixins task classes.
 
 from __future__ import annotations
 
-import gc
 import time
 import itertools
 from collections import Counter
@@ -1950,6 +1949,7 @@ class VariablesMixin(ConfigTask):
 
     default_variables = None
     allow_empty_variables = False
+    allow_missing_variables = False
 
     @classmethod
     def resolve_param_values(cls, params):
@@ -1987,6 +1987,7 @@ class VariablesMixin(ConfigTask):
                     config_inst,
                     od.Variable,
                     config_inst.x("variable_groups", {}),
+                    strict=not cls.allow_missing_variables,
                 )
 
                 # for each multi-variable, resolve each part separately and create the full
@@ -1998,6 +1999,7 @@ class VariablesMixin(ConfigTask):
                             config_inst,
                             od.Variable,
                             config_inst.x("variable_groups", {}),
+                            strict=not cls.allow_missing_variables,
                         )
                         for part in parts
                     ]
@@ -2409,7 +2411,7 @@ class ChunkedIOMixin(AnalysisTask):
         # iterate in the handler context
         with handler:
             self.chunked_io = handler
-            msg = f"iterate through {handler.n_entries} events in {handler.n_chunks} chunks ..."
+            msg = f"iterate through {handler.n_entries:_} events in {handler.n_chunks} chunks ..."
             try:
                 # measure runtimes excluding IO
                 loop_durations = []
@@ -2431,9 +2433,8 @@ class ChunkedIOMixin(AnalysisTask):
             finally:
                 self.chunked_io = None
 
-        # eager, overly cautious gc
+        # eager cleanup
         del handler
-        gc.collect()
 
 
 class HistHookMixin(ConfigTask):
