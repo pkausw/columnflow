@@ -237,7 +237,7 @@ setup_columnflow() {
     export LAW_HOME="${LAW_HOME:-${CF_BASE}/.law}"
     export LAW_CONFIG_FILE="${LAW_CONFIG_FILE:-${CF_BASE}/law.cfg}"
 
-    if which law &> /dev/null; then
+    if [ "${CF_LOCAL_ENV}" = "1" ] && which law &> /dev/null; then
         # source law's bash completion scipt
         source "$( law completion )" ""
 
@@ -338,6 +338,10 @@ cf_setup_common_variables() {
         cf_color yellow "the variable CF_REPO_BASE_ALIAS is unset"
         cf_color yellow "please consider setting it to the name of the variable that refers to your analysis base directory"
     fi
+
+    # notification variables
+    export CF_MATTERMOST_HOOK_URL="${CF_MATTERMOST_HOOK_URL:-}"
+    export CF_MATTERMOST_CHANNEL="${CF_MATTERMOST_CHANNEL:-}"
 }
 
 cf_show_banner() {
@@ -577,8 +581,8 @@ cf_setup_software_stack() {
         setopt globdots
     fi
 
-    # empty the PYTHONPATH
-    export PYTHONPATH=""
+    # empty the PYTHONPATH, except for specific customizable paths
+    export PYTHONPATH="${CF_INITIAL_PYTHONPATH:-}"
 
     # persistent PATH and PYTHONPATH parts that should be
     # priotized over any additions made in sandboxes
@@ -867,7 +871,7 @@ cf_init_submodule() {
     local submodule_path="${2}"
 
     # do nothing in remote jobs
-    [ "$CF_REMOTE_ENV" = "1" ] && return "0"
+    [ "${CF_REMOTE_ENV}" = "1" ] && return "0"
 
     # do nothing when the path does not exist or it is not a submodule
     if [ ! -e "${base_path}/${submodule_path}" ]; then

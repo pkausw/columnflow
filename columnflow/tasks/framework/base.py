@@ -24,6 +24,8 @@ from columnflow.util import is_regex, DotDict
 from columnflow.types import Sequence, Callable, Any, T
 
 
+logger = law.logger.get_logger(__name__)
+
 # default analysis and config related objects
 default_analysis = law.config.get_expanded("analysis", "default_analysis")
 default_config = law.config.get_expanded("analysis", "default_config")
@@ -77,6 +79,9 @@ class AnalysisTask(BaseTask, law.SandboxTask):
     version = luigi.Parameter(
         description="mandatory version that is encoded into output paths",
     )
+    notify_slack = law.slack.NotifySlackParameter(significant=False)
+    notify_mattermost = law.mattermost.NotifyMattermostParameter(significant=False)
+    notify_custom = law.NotifyCustomParameter(significant=False)
 
     allow_empty_sandbox = True
     sandbox = None
@@ -91,12 +96,15 @@ class AnalysisTask(BaseTask, law.SandboxTask):
     default_output_location = "config"
 
     exclude_params_index = {"user"}
-    exclude_params_req = {"user"}
-    exclude_params_repr = {"user"}
+    exclude_params_req = {"user", "notify_slack", "notify_mattermost", "notify_custom"}
+    exclude_params_repr = {"user", "notify_slack", "notify_mattermost", "notify_custom"}
+    exclude_params_branch = {"user", "notify_slack", "notify_mattermost", "notify_custom"}
+    exclude_params_workflow = {"user", "notify_slack", "notify_mattermost", "notify_custom"}
 
     # cached and parsed sections of the law config for faster lookup
     _cfg_outputs_dict = None
     _cfg_versions_dict = None
+    _cfg_resources_dict = None
 
     @classmethod
     def modify_param_values(cls, params: dict) -> dict:
@@ -168,6 +176,12 @@ class AnalysisTask(BaseTask, law.SandboxTask):
         if not items:
             return {}
 
+        # apply brace expansion to keys
+        items = sum((
+            [(_key, value) for _key in law.util.brace_expand(key)]
+            for key, value in items
+        ), [])
+
         # breakup keys at double underscores and create a nested dictionary
         items_dict = {}
         for key, value in items:
@@ -218,6 +232,36 @@ class AnalysisTask(BaseTask, law.SandboxTask):
             cls._cfg_versions_dict = cls._structure_cfg_items(items)
 
         return cls._cfg_versions_dict
+
+    @classmethod
+    def _get_cfg_resources_dict(cls):
+        if cls._cfg_resources_dict is None and law.config.has_section("resources"):
+            # helper to split resource values into key-value pairs themselves
+            def parse(key: str, value: str) -> tuple[str, list[tuple[str, Any]]]:
+                params = []
+                for part in value.split(","):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    if "=" not in part:
+                        logger.warning_once(
+                            f"invalid_resource_{key}",
+                            f"resource for key {key} contains invalid instruction {part}, skipping",
+                        )
+                        continue
+                    param, value = (s.strip() for s in part.split("=", 1))
+                    params.append((param, value))
+                return key, params
+
+            # collect config item pairs
+            items = [
+                parse(key, value)
+                for key, value in law.config.items("resources")
+                if value
+            ]
+            cls._cfg_resources_dict = cls._structure_cfg_items(items)
+
+        return cls._cfg_resources_dict
 
     @classmethod
     def get_default_version(cls, inst: AnalysisTask, params: dict[str, Any]) -> str | None:
