@@ -395,14 +395,15 @@ def normalization_weights_setup(
         # this needs to be divided by the sum of the weights weighted by their average, which
         # mathematically is equivalent to multiplying with the number of events
         self.inclusive_weight = (
-            lumi * inclusive_xsec * inclusive_norm_dict["num_events"] / inclusive_norm_dict["sum_mc_weight"]
+            lumi * inclusive_xsec / inclusive_norm_dict["num_events"] / inclusive_norm_dict["sum_mc_weight"]
             if self.dataset_inst == inclusive_dataset
             else 0
         )
         for process_id, br in branching_ratios.items():
             try:
                 sum_weights = merged_selection_stats["sum_mc_weight_per_process"][str(process_id)]
-                process_weight_table[0, process_id] = lumi * inclusive_xsec * br * merged_selection_stats["num_events"] / sum_weights
+                # process_weight_table[0, process_id] = lumi * inclusive_xsec * br * merged_selection_stats["num_events"] / sum_weights
+                process_weight_table[0, process_id] = lumi * inclusive_xsec * br / sum_weights
             except Exception as e:
                 print(e)
                 from IPython import embed
@@ -424,7 +425,8 @@ def normalization_weights_setup(
                 )
             sum_weights = merged_selection_stats["sum_mc_weight_per_process"][str(process_inst.id)]
             xsec = process_inst.get_xsec(self.config_inst.campaign.ecm).nominal
-            process_weight_table[0, process_inst.id] = lumi * xsec * merged_selection_stats["num_events"] / sum_weights
+            # process_weight_table[0, process_inst.id] = lumi * xsec * merged_selection_stats["num_events"] / sum_weights
+            process_weight_table[0, process_inst.id] = lumi * xsec / sum_weights
 
     self.process_weight_table = process_weight_table
     self.xs_process_ids = set(self.process_weight_table.rows[0])
